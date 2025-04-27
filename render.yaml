@@ -1,0 +1,11 @@
+
+services:
+  - type: web
+    name: techtral-voicebot
+    env: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    envVars:
+      - key: PORT
+        value: 3000

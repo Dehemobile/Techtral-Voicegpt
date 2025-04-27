@@ -1,63 +1,60 @@
 
-// Voicebot TECHTRAL – v1.0
-// Framework: Node.js with Express
-// Function: Handle incoming Twilio calls, play TTS via ElevenLabs, collect user data
+import express from "express";
+import bodyParser from "body-parser";
+import { OpenAI } from "openai";
+import twilio from "twilio";
+import axios from "axios";
+import dotenv from "dotenv";
 
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
-const { twiml: { VoiceResponse } } = require('twilio');
+dotenv.config();
 
 const app = express();
+const port = process.env.PORT || 3000;
+
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Config – ElevenLabs API key și Voice ID Lea
-const ELEVEN_API_KEY = 'sk-VjvM4x9QBhg6SXB9ZYgZTxJHtfqYctwR0QUh92A7n2sJ3UXK';
-const ELEVEN_VOICE_ID = {
-  de: 'EXAVITQu4vr4xnSDxMaL',  // Lea – German
-  en: 'EXAVITQu4vr4xnSDxMaL'   // Lea – English (fallback)
-};
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Generate TTS audio
-async function generateTTS(text, lang = 'de') {
-  const voiceId = ELEVEN_VOICE_ID[lang] || ELEVEN_VOICE_ID['de'];
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
-  const response = await axios.post(url, {
-    text,
-    model_id: 'eleven_monolingual_v1',
-    voice_settings: { stability: 0.45, similarity_boost: 0.7 }
-  }, {
-    headers: {
-      'xi-api-key': ELEVEN_API_KEY,
-      'Content-Type': 'application/json'
-    },
-    responseType: 'arraybuffer'
+app.post("/voice", async (req, res) => {
+  const twiml = new twilio.twiml.VoiceResponse();
+  const userSpeech = req.body.SpeechResult || "Hello";
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [{ role: "user", content: userSpeech }],
   });
-  return response.data;
+
+  const aiResponse = completion.choices[0].message.content;
+  const elevenlabsAudioUrl = await generateElevenLabsAudio(aiResponse);
+
+  twiml.play(elevenlabsAudioUrl);
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+async function generateElevenLabsAudio(text) {
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+
+  const response = await axios({
+    method: "POST",
+    url: `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    headers: {
+      "xi-api-key": process.env.ELEVENLABS_API_KEY,
+      "Content-Type": "application/json",
+    },
+    data: {
+      text: text,
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.75,
+      },
+    },
+  });
+
+  return response.data.audio_url;
 }
 
-// Endpoint pentru Twilio – primire apel
-app.post('/voice', async (req, res) => {
-  const response = new VoiceResponse();
-
-  // Mesajul inițial (în germană)
-  const welcomeText = 'Willkommen bei TECHTRAL. Bleiben Sie bitte kurz dran. Wir stellen Ihnen ein paar Fragen, damit wir Ihnen besser helfen können.';
-
-  const gather = response.gather({ input: 'speech', action: '/handle-name', method: 'POST', language: 'de-DE' });
-  gather.say({ language: 'de-DE', voice: 'Polly.Vicki' }, welcomeText);
-
-  res.type('text/xml');
-  res.send(response.toString());
+app.listen(port, () => {
+  console.log(`VoiceBot AI server listening on port ${port}`);
 });
-
-// Temporar – răspuns când se colectează numele
-app.post('/handle-name', (req, res) => {
-  const response = new VoiceResponse();
-  const name = req.body.SpeechResult || 'Kunde';
-  response.say({ language: 'de-DE', voice: 'Polly.Vicki' }, `Danke ${name}. Ein Ticket wird erstellt.`);
-  res.type('text/xml');
-  res.send(response.toString());
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`TECHTRAL Voicebot listening on port ${PORT}`));
